@@ -36,6 +36,9 @@ python main.py
 - Say **"cursor on"** to activate eye-controlled cursor movement
 - Say **"cursor off"** to deactivate eye-controlled cursor movement
 
+### Working
+(/public/image.png)
+
 ### Eye controls:
 - Move your eyes to control the cursor
 - Wink your left eye to perform a click
