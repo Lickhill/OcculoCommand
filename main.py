@@ -5,82 +5,114 @@ import speech_recognition as sr
 import threading
 import time
 
-# Initialize speech recognizer
+# Initialize
 recognizer = sr.Recognizer()
-
-# Global flag to control cursor movement
 cursor_active = False
 
+# Smooth movement
+prev_x, prev_y = 0, 0
+smooth_factor = 0.2
 
+
+# 🎤 Voice control function (FIXED)
 def listen_for_commands():
     global cursor_active
-    while True:
+
+    try:
         with sr.Microphone() as source:
-            print("Listening for commands...")
-            audio = recognizer.listen(source)
-            try:
-                command = recognizer.recognize_google(audio).lower()
-                words = command.split()
-                print(f"Recognized: {command}")
-                if any(word in {"off", "of"} for word in words):
-                    cursor_active = False
-                    print("Cursor movement deactivated")
-                # Then check for activation
-                elif "on" in words:
-                    cursor_active = True
-                    print("Cursor movement activated")
-            except sr.UnknownValueError:
-                pass
-            except sr.RequestError:
-                print("Could not request results from speech recognition service")
+            recognizer.adjust_for_ambient_noise(source)
+
+            while True:
+                print("Listening...")
+                try:
+                    audio = recognizer.listen(source, timeout=5)
+                    command = recognizer.recognize_google(audio).lower()
+                    print("Command:", command)
+
+                    if "off" in command:
+                        cursor_active = False
+                        print("Cursor OFF")
+
+                    elif "on" in command:
+                        cursor_active = True
+                        print("Cursor ON")
+
+                except sr.WaitTimeoutError:
+                    continue
+                except sr.UnknownValueError:
+                    print("Didn't catch that")
+                except Exception as e:
+                    print("Speech error:", e)
+
+    except Exception as e:
+        print("Microphone error:", e)
 
 
-# Start the speech recognition thread
+# Start voice thread
 threading.Thread(target=listen_for_commands, daemon=True).start()
 
+# Camera + FaceMesh
 cam = cv2.VideoCapture(0)
 face_mesh = mp.solutions.face_mesh.FaceMesh(refine_landmarks=True)
+
 screen_w, screen_h = pyautogui.size()
-sensitivity = 2.0  # Reduced sensitivity
-pyautogui.PAUSE = 0.1  # Add a small delay between PyAutoGUI actions
 
 while True:
-    _, frame = cam.read()
+    success, frame = cam.read()
+    if not success:
+        continue
+
     frame = cv2.flip(frame, 1)
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
     output = face_mesh.process(rgb_frame)
-    landmark_points = output.multi_face_landmarks
-    frame_h, frame_w, _ = frame.shape
 
-    if landmark_points and cursor_active:
-        landmarks = landmark_points[0].landmark
-        for id, landmark in enumerate(landmarks[474:478]):
-            x = int(landmark.x * frame_w)
-            y = int(landmark.y * frame_h)
-            cv2.circle(frame, (x, y), 3, (0, 255, 0))
+    if output.multi_face_landmarks:
+        landmarks = output.multi_face_landmarks[0].landmark
+        frame_h, frame_w, _ = frame.shape
 
-            if id == 1:
-                adj_x = (landmark.x - 0.5) * sensitivity + 0.5
-                adj_y = (landmark.y - 0.5) * sensitivity + 0.5
+        # 🔹 Cursor movement (NOSE - stable)
+        if cursor_active:
+            nose = landmarks[1]
 
-                screen_x = max(10, min(screen_w - 10, screen_w * adj_x))
-                screen_y = max(10, min(screen_h - 10, screen_h * adj_y))
+            x = int(nose.x * frame_w)
+            y = int(nose.y * frame_h)
 
-                # Implement boundary checking
-                if 10 < screen_x < screen_w - 10 and 10 < screen_y < screen_h - 10:
-                    pyautogui.moveTo(screen_x, screen_y)
+            cv2.circle(frame, (x, y), 5, (0, 255, 0))
 
-        left = [landmarks[145], landmarks[159]]
-        for landmark in left:
-            x = int(landmark.x * frame_w)
-            y = int(landmark.y * frame_h)
-            cv2.circle(frame, (x, y), 3, (0, 255, 255))
+            screen_x = nose.x * screen_w
+            screen_y = nose.y * screen_h
 
-        if (left[0].y - left[1].y) < 0.009:
+            # Smooth movement
+            curr_x = prev_x + (screen_x - prev_x) * smooth_factor
+            curr_y = prev_y + (screen_y - prev_y) * smooth_factor
+
+            pyautogui.moveTo(curr_x, curr_y)
+
+            prev_x, prev_y = curr_x, curr_y
+
+        # 🔹 Blink detection (LEFT EYE)
+        left_top = landmarks[159]
+        left_bottom = landmarks[145]
+
+        x1 = int(left_top.x * frame_w)
+        y1 = int(left_top.y * frame_h)
+        x2 = int(left_bottom.x * frame_w)
+        y2 = int(left_bottom.y * frame_h)
+
+        cv2.circle(frame, (x1, y1), 3, (0, 255, 255))
+        cv2.circle(frame, (x2, y2), 3, (0, 255, 255))
+
+        blink_distance = abs(left_top.y - left_bottom.y)
+
+        if cursor_active and blink_distance < 0.008:
             pyautogui.click()
-            time.sleep(1)  # Use time.sleep instead of pyautogui.sleep
+            print("CLICK")
+            time.sleep(0.5)
 
+    # Display
     cv2.imshow("Eye Controlled Mouse", frame)
+
     if cv2.waitKey(1) & 0xFF == ord("q"):
         break
 
