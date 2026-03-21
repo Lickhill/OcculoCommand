@@ -14,7 +14,7 @@ prev_x, prev_y = 0, 0
 smooth_factor = 0.2
 
 
-# 🎤 Voice control function (FIXED)
+# Voice control function
 def listen_for_commands():
     global cursor_active
 
